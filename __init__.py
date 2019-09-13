@@ -24,7 +24,7 @@ class ScrambleEbookActionBase(InterfaceActionBase):
     description         = 'Create a copyright-safe scrambled copy of an ebook for debugging purposes'
     supported_platforms = ['windows', 'osx', 'linux']
     author              = 'jackie_w'
-    version             = (0, 0, 9)
+    version             = (0, 0, 10)
     minimum_calibre_version = (3, 41, 0)
 
     #: This field defines the GUI plugin class that contains all the code
