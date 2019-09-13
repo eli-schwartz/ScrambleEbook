@@ -36,3 +36,7 @@ class ScrambleEbookActionBase(InterfaceActionBase):
         ''' This method must return True to enable customization via
         Preferences->Plugins  '''
         return False
+
+    def cli_main(self, argv):
+        from calibre_plugins.scrambleebook_plugin.scrambleebook import main
+        main('this came from a .zip', argv[1:])

@@ -228,13 +228,10 @@ class EbookScramble(QDialog):
                 # not calibre library book, ie standalone or book on attached device
                 sourcepath = self.ebook.path_to_ebook
 
-            if self.from_calibre:
-                # calibre plugin
+            try:
                 self.dummyimg = get_resources('images/' + format + '.png')
                 self.dummysvg = get_resources('images/' + format + '.svg')
-                self.dirout = ''
-            else:
-                # standalone version
+            except:
                 dummyimgdir = os.path.join(self.progdir, 'images')
                 dummy_imgpath = os.path.join(dummyimgdir, format + '.png')
                 with open(dummy_imgpath, 'rb') as f:
@@ -243,6 +240,12 @@ class EbookScramble(QDialog):
                 with open(dummy_svgpath, 'rb') as f:
                     ans = f.read()
                 self.dummysvg = self.ebook.decode(ans)
+
+            if self.from_calibre:
+                # calibre plugin
+                self.dirout = ''
+            else:
+                # standalone version
                 self.dirout = dirn
                 self.log.append('\n--- New ebook: %s' % sourcepath)
 
@@ -1152,15 +1155,16 @@ def get_fileparts(path):
     is_kepub_epub = fn.rpartition('.')[-1].lower() == 'kepub'
     return (dirname, fn, ext, is_kepub_epub)
 
-if __name__ == "__main__":
-    import sys
+def main(prog, args):
 
-    prog = sys.argv[0]
-    progdir, x, x, x = get_fileparts(prog)
+    if prog.endswith('.py'):
+        progdir, x, x, x = get_fileparts(prog)
+    else:
+        progdir = None
 
-    if len(sys.argv) > 1:
+    if args:
         # Windows Send-to or drag-drop onto .bat
-        ebook_path = sys.argv[1]
+        ebook_path = args[0]
     else:
         ebook_path = ''
 
@@ -1180,8 +1184,12 @@ if __name__ == "__main__":
     #MY_SETTINGS['x_meta_extra'] = False # True = Try to remove other metadata which identifies book
     #MY_SETTINGS['x_fnames'] = False     # True = Rename files (HTML, images, CSS) to generic filenames
 
-    app = QApplication(sys.argv)
+    app = QApplication(args)
     win = EbookScramble(None, ebook_path, book_id=None, dsettings=MY_SETTINGS, progdir=progdir)
 
     win.show()
     app.exec_()
+
+if __name__ == "__main__":
+    import sys
+    main(sys.argv[0], sys.argv[1:])
