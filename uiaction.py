@@ -18,14 +18,9 @@ from calibre.gui2.actions import InterfaceAction
 
 # Get required support modules for all plugin actions
 import os
-try:
-    from PyQt5.Qt import (QMenu, QToolButton,
-        QDialog, QLabel, QDialogButtonBox,
-        QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton)
-except ImportError:
-    from PyQt4.Qt import (QMenu, QToolButton,
-        QDialog, QLabel, QDialogButtonBox,
-        QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton)
+from PyQt5.Qt import (QMenu, QToolButton,
+    QDialog, QLabel, QDialogButtonBox,
+    QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton)
 
 from calibre.gui2 import error_dialog
 
@@ -114,11 +109,11 @@ class ScrambleEbookUiAction(InterfaceAction):
 
             if not rows or len(rows) == 0:
                 errmsg = 'No book selected'
-                raise SelectedBookError, errmsg
+                raise SelectedBookError(errmsg)
 
             if len(rows) > 1:
                 errmsg = 'More than one book selected'
-                raise SelectedBookError, errmsg
+                raise SelectedBookError(errmsg)
 
             if self.is_library_selected:
                 # book is in calibre library
@@ -142,9 +137,9 @@ class ScrambleEbookUiAction(InterfaceAction):
                 except:
                     path_to_ebook = None
 
-                if not path_to_ebook:
+                if path_to_ebook is None:
                     errmsg = 'No %s available for this book' % ','.join(OK_FORMATS)
-                    raise SelectedBookError, errmsg
+                    raise SelectedBookError(errmsg)
             else:
                 # book is on device
                 paths = self.gui.current_view().model().paths(rows)
@@ -155,15 +150,16 @@ class ScrambleEbookUiAction(InterfaceAction):
                 if not ext.upper() in OK_FORMATS:
                     errmsg = 'Only books with file extensions %s are valid.\n\n' % ','.join(OK_FORMATS)
                     errmsg += '%s\nnot valid for this plugin' % path_to_ebook
-                    raise SelectedBookError, errmsg
+                    raise SelectedBookError(errmsg)
 
             # all OK, proceed with action
-            dlg = EbookScramble(self.gui, path_to_ebook, book_id=book_id, from_calibre=True)
+            dlg = EbookScramble(path_to_ebook, book_id=book_id, from_calibre=True, parent=self.gui)
             dlg.exec_()
 
-        except SelectedBookError as e:
-            return error_dialog(self.gui, 'ScrambleEbook: Book selection error',
-                                unicode(e), show=True)
+        except SelectedBookError as err:
+            return error_dialog(self.gui,
+                    '%s: Book selection error' % self.name,
+                    str(err), show=True)
 
 class EbookSelectFormat(QDialog):
     # select a single format if >1 suitable to be scrambled

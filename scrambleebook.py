@@ -5,21 +5,26 @@ import os
 import random
 import re
 import shutil
-from base64 import b64encode
+
+from polyglot.builtins import iteritems, iterkeys, itervalues, unicode_type
+#from polyglot.binary import as_base64_unicode
+
+from PyQt5.Qt import (QApplication, QDialog, Qt, QLabel, QTextBrowser,
+    QDialogButtonBox, QMessageBox, QImage, QCheckBox, QPushButton,
+    QFont, QTextCursor, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
+    QLineEdit, QIcon, QUrl, QListWidget, QSplitter)
 
 try:
-    from PyQt5.Qt import (QApplication, QDialog, Qt, QLabel, QTextBrowser,
-        QDialogButtonBox, QMessageBox, QImage, QCheckBox, QPushButton,
-        QFont, QTextCursor, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
-        QLineEdit, QIcon, QUrl, QListWidget, QSplitter)
-    from PyQt5.QtWebKitWidgets import QWebView
-    from PyQt5.QtWebKit import QWebSettings
-except ImportError:
-    from PyQt4.Qt import (QApplication, QDialog, Qt, QLabel, QTextBrowser,
-        QDialogButtonBox, QMessageBox, QImage, QCheckBox, QPushButton,
-        QFont, QTextCursor, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
-        QLineEdit, QIcon, QUrl, QListWidget, QSplitter)
-    from PyQt4.QtWebKit import QWebView, QWebSettings
+    from PyQt5.QtWebKitWidgets import QWebView as Webview
+    print('PyQt5.QtWebKitWidgets.QWebView OK')
+except:
+    print('PyQt5.QtWebKitWidgets.QWebView failed')
+    try:
+        from PyQt5.QtWebEngineWidgets import QWebEngineView as Webview
+        print('PyQt5.QtWebEngineWidgets.QWebEngineView OK')
+    except:
+        print('PyQt5.QtWebEngineWidgets.QWebEngineView failed')
+
 
 from calibre.library import db
 from calibre.gui2 import (choose_dir, choose_files, error_dialog, warning_dialog)
@@ -34,7 +39,7 @@ from calibre.ebooks.oeb.polish.cover import find_cover_image
 from calibre.ebooks.oeb.polish.replace import rename_files
 
 MYNAME = 'ScrambleEbook'
-MYVERSION = (0, 0, 5)
+MYVERSION = (0, 0, 9)
 MR_SETTINGS = {
     'x_dgts': True,
     'x_html': True,
@@ -56,13 +61,14 @@ class EbookScramble(QDialog):
     ''' Read an EPUB/KEPUB/AZW3 de-DRM'd ebook file and
         scramble various contents '''
 
-    def __init__(self, gui, pathtoebook, book_id=None, dsettings={}, progdir=None, from_calibre=False):
-        QDialog.__init__(self, parent=gui)
-        self.gui = gui
+    def __init__(self, pathtoebook, book_id=None, dsettings={}, progdir=None, from_calibre=False, parent=None):
+        QDialog.__init__(self, parent=parent)
+        self.gui = parent
         self.pathtoebook = pathtoebook
         self.book_id = book_id
         self.progdir = progdir
-        self.dsettings = {k:v for (k, v) in MR_SETTINGS.iteritems()}
+
+        self.dsettings = MR_SETTINGS.copy()
         self.dsettings.update(dsettings)
         self.from_calibre = from_calibre
 
@@ -74,12 +80,13 @@ class EbookScramble(QDialog):
         self.meta, self.errors = {}, {}
         self.is_scrambled = False
         self.dummyimg = None
-        self.dummysvg = u''
+        self.dummysvg = ''
 
         self.callibs = tuple([])
         self.lib_path, self.db = None, None
         if self.from_calibre:
-            excl = self.gui.iactions['Choose Library'].stats.stats.keys()
+            #excl = self.gui.iactions['Choose Library'].stats.stats.keys()
+            excl = list(self.gui.iactions['Choose Library'].stats.stats.keys())
             self.callibs = tuple([os.path.normpath(k) for k in excl])
             self.db = self.gui.current_db
             lib_path = self.db.library_path
@@ -192,7 +199,7 @@ class EbookScramble(QDialog):
         self.rename_file_map = {}
         self.is_scrambled = False
         self.dummyimg = None
-        self.dummysvg = u''
+        self.dummysvg = ''
         self.runButton.setEnabled(True)
         self.buttonBox.button(QDialogButtonBox.Save).setEnabled(False)
 
@@ -317,7 +324,8 @@ class EbookScramble(QDialog):
         return savedir
 
     def choose_source_ebook(self):
-        sf = unicode(self.sourcefile.text())
+        #sf = unicode(self.sourcefile.text())
+        sf = self.sourcefile.text()
         seldir = get_fileparts(sf)[0] if sf else ''
         title = _('Select source ebook')
         selfiles = choose_files(self, name='', title=title, filters=[('Ebooks', ['epub', 'kepub', 'azw3'])], select_only_single_file=True, default_dir=seldir)
@@ -326,12 +334,13 @@ class EbookScramble(QDialog):
             self.initialise_new_file(self.pathtoebook)
 
     def create_scramble_book(self):
-        sf = unicode(self.sourcefile.text())
+        #sf = unicode(self.sourcefile.text())
+        sf = self.sourcefile.text()
         self.log.append('\nScrambling %s ...' % sf)
         self.viewlog()
 
         scrambler = EbookScrambleAction(self.ebook, self.dsettings, self.dummyimg, self.dummysvg)
-        self.rename_file_map = {k:v for (k,v) in scrambler.file_map.iteritems()}
+        self.rename_file_map = {k:v for (k,v) in iteritems(scrambler.file_map)}
 
         self.meta['scramb'] = get_metadata(self.ebook)
         self.errors['scramb'] = get_run_check_error(self.ebook)
@@ -344,27 +353,27 @@ class EbookScramble(QDialog):
         self.viewlog()
 
     def change_rules(self):
-        dlg = EbookScrambleRulesDlg(self.dsettings, parent=self)
+        dlg = EbookScrambleRulesDlg(self.dsettings, parent=self.gui)
         if dlg.exec_():
-            self.dsettings.update(dlg.results)
+            self.dsettings.update(dlg.dsettings)
             self.log.append('\n--- Scrambling rules updated ---')
         self.viewlog()
 
     def preview_ebook(self):
-        dlg = EbookScramblePreviewDlg(self.ebook, self.eborig, self.is_scrambled, self.rename_file_map, parent=self)
+        dlg = EbookScramblePreviewDlg(self.ebook, self.eborig, self.is_scrambled, self.rename_file_map, parent=self.gui)
         dlg.exec_()
 
     def view_metadata(self):
-        dlg = EbookScrambleMetadataDlg(self.meta, parent=self)
+        dlg = EbookScrambleMetadataDlg(self.meta, parent=self.gui)
         dlg.exec_()
 
     def view_errors(self):
-        dlg = EbookScrambleErrorsDlg(self.errors, parent=self)
+        dlg = EbookScrambleErrorsDlg(self.errors, parent=self.gui)
         dlg.exec_()
 
     def display_settings(self):
         self.log.append('\nCurrent Scramble rules:')
-        [self.log.append('%s: %s' % (k, v)) for (k,v) in sorted(self.dsettings.iteritems())]
+        [self.log.append('%s: %s' % (k, v)) for (k,v) in sorted(iteritems(self.dsettings))]
 
     def viewlog(self):
         self.browser.setText('\n'.join(self.log))
@@ -388,7 +397,7 @@ class EbookScramble(QDialog):
         except:
             text = 'Configurable utility for creating a copy of an ebook with scrambled text content.\n(azw3, epub, kepub, kepub.epub)\n\nIts purpose is to avoid breach of copyright when you need to share the ebook with someone but the text content is unimportant, e.g. resolving technical problems.'
             ver += 'standalone'
-        QMessageBox.about(self, 'About %s [%s]' % (MYNAME, ver), text.decode('utf-8'))
+        QMessageBox.about(self, 'About %s [%s]' % (MYNAME, ver), text)
 
 
 class EbookScrambleAction():
@@ -396,12 +405,12 @@ class EbookScrambleAction():
     def __init__(self, ebook, dsettings, dummyimg, dummysvg):
         self.eb = ebook
 
-        self.dsettings = {k:v for (k,v) in dsettings.iteritems()}
+        self.dsettings = dsettings.copy()
         self.dummyimg, self.dummysvg = dummyimg, dummysvg
 
         self.lowers = list('abcdefghijklmnopqrstuvwxyz')
         self.uppers = [c.upper() for c in self.lowers]
-        self.digits = list(u'0123456789')
+        self.digits = list('0123456789')
         self.log = []
         self.file_map = {}
 
@@ -561,7 +570,7 @@ class EbookScrambleAction():
             return newchar
 
         if not text: return text
-        return u''.join([scramble_char(char, scramble_dgts) for char in text])
+        return ''.join([scramble_char(char, scramble_dgts) for char in text])
 
 
     def scramble_filenames(self, names, base):
@@ -605,8 +614,6 @@ class EbookScrambleAction():
     def scramble_metadata(self):
 
         def reset_package_uid(uidname, uidval):
-            pkgs = self.eb.opf_xpath('//opf:package')
-            pk = pkgs[0] if pkgs else None
             idents = self.eb.opf_xpath('//*[local-name()="identifier" and @id]')
             ident = idents[0] if idents else None
             if pk is not None:
@@ -624,6 +631,8 @@ class EbookScrambleAction():
                     self.eb.dirty(ncxname)
 
         to_remove = []
+        pk = None
+
         # remove <metadata> comments found in Amazon books
         for child in [e for e in self.eb.opf_xpath('//opf:metadata')[0]]:
             try:
@@ -633,37 +642,36 @@ class EbookScrambleAction():
 
         # remove all calibre <meta> items
         for meta in self.eb.opf_xpath('//opf:metadata/opf:meta'):
-            remove_meta = False
-            for att, val in meta.attrib.items():
-                if val.startswith('calibre:'):
-                    remove_meta = True
-            if remove_meta:
+            if [val for val in itervalues(meta.attrib) if val.startswith('calibre:')]:
                 to_remove.append(meta)
 
         if self.dsettings['x_meta_extra']:
-            # remove all dcterms <meta> @property items
-            elems = [e for e in self.eb.opf_xpath('//opf:metadata/opf:meta[@property]') if e.attrib.get('property').startswith('dcterms:')]
-            [to_remove.append(e) for e in elems]
+            for meta in self.eb.opf_xpath('//opf:metadata/opf:meta[@property]'):
+                if meta.get('property').startswith('dcterms:'):
+                    # remove all dcterms <meta> @property items
+                    to_remove.append(meta)
+                elif meta.get('property')=='file-as':
+                    # anonymise all <meta> with property "file-as"
+                    meta.text = 'Anon'
 
-            # remove dc:identifier with known schemes
-            idents = ('isbn', 'mobi-asin', 'amazon', 'barnesnoble', 'goodreads')
-            for elem in self.eb.opf_xpath('//*[local-name()="metadata"]/*[local-name()="identifier"]'):
-                scheme = None
-                for xkey in elem.attrib.keys():
-                    if xkey.endswith('scheme'):
-                        scheme = elem.get(xkey)
-                if scheme is not None:
-                    if scheme.lower() in idents:
-                        to_remove.append(elem)
+            #get the <package> unique-identifier
+            pk = self.eb.opf_xpath('//opf:package')[0]
+            pk_uid = pk.get('unique-identifier')
 
+            # remove all dc:identifier except the one which matches package unique-identifier
+            for ident in self.eb.opf_xpath('//*[local-name()="metadata"]/*[local-name()="identifier"]'):
+                if ident.get('id', '') != pk_uid:
+                    to_remove.append(ident)
+
+        # remove the elements from <metadata>
         md = self.eb.opf_xpath('//opf:metadata')[0]
         [md.remove(child) for child in to_remove]
 
-        # obscure some dc: items
+        # obscure some dc: items.
         dcitems = ('description',)
         searchpath = '//*[' + ' or '.join(['local-name()="%s"' % dc for dc in dcitems]) + ']'
         for elem in [e for e in self.eb.opf_xpath(searchpath)]:
-            elem.text = None
+            elem.text = '*removed*'
             elem.attrib.clear()
 
         if self.dsettings['x_meta_extra']:
@@ -671,15 +679,12 @@ class EbookScrambleAction():
             dcitems = ('title', 'creator', 'rights', 'publisher', 'source', 'subject')
             searchpath = '//*[' + ' or '.join(['local-name()="%s"' % dc for dc in dcitems]) + ']'
             for elem in [e for e in self.eb.opf_xpath(searchpath)]:
-                #for attr in tuple(elem.attrib):
-                #    elem.set(attr, self.scramble_text(elem.attrib[attr], self.dsettings['x_dgts']))
-                elem.attrib.clear()
-                if elem.tag.lower().endswith('title'):
-                    elem.text = 'Scrambled Book'
-                elif elem.tag.lower().endswith('creator'):
+                # do not remove all attribs. needed for epub3 creator/title
+                #elem.attrib.clear()
+                if elem.tag.lower().endswith(('title', 'creator')):
                     elem.text = 'Anon'
-                else:
-                    elem.text = None
+                elif elem.text is not None:
+                    elem.text = '*removed*'
 
         if self.dsettings['x_meta_extra']:
             reset_package_uid('bookid', 'unknown')
@@ -691,8 +696,7 @@ class EbookScrambleRulesDlg(QDialog):
     def __init__(self, dsettings, parent=None):
         QDialog.__init__(self, parent=parent)
 
-        self.dsettings = {k:v for (k,v) in dsettings.iteritems()}
-
+        self.dsettings = dsettings.copy()
         self.cbkeys = ('x_html', 'x_dgts', 'keep_num_link', 'x_extlink', 'x_toc',
                 'x_imgs', 'keep_cover', 'x_fontsno', 'x_fontsob',
                 'x_meta', 'x_meta_extra', 'x_fnames')
@@ -783,10 +787,6 @@ class EbookScrambleRulesDlg(QDialog):
         self.dcheckbox['x_meta'].toggled.connect(self.meta_toggled)
         self.dcheckbox['x_imgs'].toggled.connect(self.images_toggled)
 
-    @property
-    def results(self):
-        return {k:v for (k,v) in self.dsettings.iteritems()}
-
     def html_toggled(self, bool):
         if not bool:
             self.dcheckbox['x_dgts'].setChecked(bool)
@@ -831,8 +831,8 @@ class EbookScrambleRulesDlg(QDialog):
             self.dsettings[k] = self.dcheckbox[k].isChecked()
 
     def defButton_clicked(self):
-        self.dsettings = {k:v for (k,v) in MR_SETTINGS.iteritems()}
-        [self.dcheckbox[k].setChecked(v) for (k, v) in MR_SETTINGS.iteritems()]
+        self.dsettings = MR_SETTINGS.copy()
+        [self.dcheckbox[k].setChecked(v) for (k, v) in iteritems(MR_SETTINGS)]
 
     def accept(self):
         # Any accept actions which need to be done before returning to caller
@@ -841,6 +841,7 @@ class EbookScrambleRulesDlg(QDialog):
 
 
 class EbookScramblePreviewDlg(QDialog):
+
     def __init__(self, ebook, orig, is_scrambled, fmap, parent=None):
         QDialog.__init__(self, parent=parent)
 
@@ -848,7 +849,7 @@ class EbookScramblePreviewDlg(QDialog):
 
         self.orig = orig
         self.ebook = ebook
-        self.revfmap = {v:k for (k, v) in fmap.iteritems()}
+        self.revfmap = {v:k for (k, v) in iteritems(fmap)}
 
         # create widgets
         buttonBox = QDialogButtonBox(QDialogButtonBox.Close)
@@ -856,21 +857,22 @@ class EbookScramblePreviewDlg(QDialog):
         self.htmlList_orig = QListWidget()
         self.htmlList_orig.setMinimumWidth(300)
 
-        self.webview_orig = QWebView()
+        self.webview_orig = Webview()
+        self.webview_scram = Webview()
+
         self.webview_orig.setHtml('<body><p>*** Text content could not be displayed ...</p></body>')
         self.webview_orig.setMinimumWidth(400)
 
         self.htmlList_scram = QListWidget()
         self.htmlList_scram.setMinimumWidth(300)
 
-        self.webview_scram = QWebView()
         self.webview_scram.setHtml('<body><p>*** Text content could not be displayed ...</p></body>')
         self.webview_scram.setMinimumWidth(400)
 
-        cssurl = 'data:text/css;charset=utf-8;base64,'
-        cssurl += b64encode(CSSBG.encode('utf-8'))
+        '''cssurl = 'data:text/css;charset=utf-8;base64,'
+        cssurl += as_base64_unicode(CSSBG)
         self.webview_orig.settings().setUserStyleSheetUrl(QUrl(cssurl))
-        self.webview_scram.settings().setUserStyleSheetUrl(QUrl(cssurl))
+        self.webview_scram.settings().setUserStyleSheetUrl(QUrl(cssurl))'''
 
         gpbox1 = QGroupBox()
         lay1 = QHBoxLayout()
@@ -912,8 +914,8 @@ class EbookScramblePreviewDlg(QDialog):
         self.htmlnames_scram = get_textnames(self.ebook)
         self.htmlnames_orig = tuple([self.revfmap.get(an, an) for an in self.htmlnames_scram])
 
-        gpbox1.setTitle('Original HTML files: %s' % unicode(len(self.htmlnames_orig)))
-        gpbox3.setTitle('Original HTML files: %s' % unicode(len(self.htmlnames_scram)))
+        gpbox1.setTitle('Original HTML files: %s' % len(self.htmlnames_orig))
+        gpbox3.setTitle('Original HTML files: %s' % len(self.htmlnames_scram))
         self.htmlList_orig.clear()
         self.htmlList_orig.addItems(self.htmlnames_orig)
         self.htmlList_scram.clear()
@@ -929,19 +931,21 @@ class EbookScramblePreviewDlg(QDialog):
             gpbox2.setVisible(False)
         else:
             self.setWindowTitle(msg + ' vs. Scrambled')
-            gpbox3.setTitle('Scrambled HTML files: %s' % unicode(len(self.htmlnames_scram)))
+            gpbox3.setTitle('Scrambled HTML files: %s' % len(self.htmlnames_scram))
             gpbox4.setTitle('Scrambled text content:')
 
         self.htmlList_scram.setCurrentRow(0)
 
     def htmlList_currentRowChanged(self, row):
         if row < 0: return
-        name = unicode(self.htmlList_scram.currentItem().text())
+        #name = unicode(self.htmlList_scram.currentItem().text())
+        name = self.htmlList_scram.currentItem().text()
         self.htmlList_orig.setCurrentRow(row)
         self.webview_refresh(name)
 
     def htmlList_itemDoubleClicked(self, item):
-        name = unicode(item.text())
+        #name = unicode(item.text())
+        name = item.text()
         self.webview_refresh(name)
 
     def webview_refresh(self, name):
@@ -949,9 +953,16 @@ class EbookScramblePreviewDlg(QDialog):
         abspath_orig = self.orig.name_to_abspath(name_orig)
         abspath = self.ebook.name_to_abspath(name)
 
-        self.webview_scram.settings().clearMemoryCaches()
+        '''try:
+            self.webview_scram.settings().clearMemoryCaches()
+        except:
+            pass'''
         load_html(abspath, self.webview_scram)
-        self.webview_orig.settings().clearMemoryCaches()
+
+        '''try:
+            self.webview_orig.settings().clearMemoryCaches()
+        except:
+            pass'''
         load_html(abspath_orig, self.webview_orig)
 
 
@@ -966,18 +977,10 @@ class EbookScrambleMetadataDlg(QDialog):
         origbrowser = QTextBrowser()
         origbrowser.setText('')
         origbrowser.setReadOnly(True)
-        #webview = QWebView()
-        #ffam = webview.settings().fontFamily(QWebSettings.FixedFont)
-        #origbrowser.setFontFamily(ffam)
-        #origbrowser.setFontWeight(QFont.Bold)
-        #origbrowser.setLineWrapMode(QTextBrowser.NoWrap)
 
         browser = QTextBrowser()
         browser.setText('')
         browser.setReadOnly(True)
-        #browser.setFontFamily(ffam)
-        #browser.setFontWeight(QFont.Bold)
-        #browser.setLineWrapMode(QTextBrowser.NoWrap)
 
         gpbox2 = QGroupBox('Metadata: Original')
         lay2 = QHBoxLayout()
@@ -1022,12 +1025,9 @@ class EbookScrambleErrorsDlg(QDialog):
 
         buttonBox = QDialogButtonBox(QDialogButtonBox.Close)
 
-        webview = QWebView()
-        ffam = webview.settings().fontFamily(QWebSettings.FixedFont)
-
         browser = QTextBrowser()
         browser.setText('')
-        browser.setFontFamily(ffam)
+        browser.setFontFamily("Courier")
         browser.setFontWeight(QFont.Bold)
         browser.setLineWrapMode(QTextBrowser.NoWrap)
         browser.setReadOnly(True)
@@ -1067,11 +1067,12 @@ class EbookScrambleErrorsDlg(QDialog):
         log = []
         orig_errors = self.derrors.get('orig', {})
         scramb = self.derrors.get('scramb', {})
-        allkeys = set(orig_errors.keys() + scramb.keys())
+        allkeys = set(list(orig_errors.keys()) + list(scramb.keys()))
+
         if len(allkeys) > 0:
             log.append('Error\nLevel Original  After  Calibre error message')
         else:
-            log.append('Calibre error checker found no errors')
+            log.append('Calibre CheckBook found no errors')
 
         for lev, msg in sorted(allkeys, reverse=True):
             log.append('{0:5}{2:9}{3:7}  {1}'.format(lev, msg,
@@ -1081,8 +1082,8 @@ class EbookScrambleErrorsDlg(QDialog):
 
     def copy_to_clipboard(self, *args):
         QApplication.clipboard().setText(
-            '%s\n\n%s' % (unicode(self.windowTitle()),
-                        unicode(self.report)))
+            '%s\n\n%s' % (self.windowTitle(), self.report))
+        #    '%s\n\n%s' % (unicode(self.windowTitle()), unicode(self.report)))
         if hasattr(self, 'ctc_button'):
             self.ctc_button.setText(_('Copied'))
 
@@ -1111,31 +1112,31 @@ def get_metadata(ebook):
 def get_textnames(ebook):
     # return doc names in spine order + any non-spine docs (e.g. nav.xhtml)
     names = list(get_spinenames(ebook))
-    others = [n for (n, m) in sorted(ebook.mime_map.iteritems()) if m in OEB_DOCS and n not in names]
+    others = [n for (n, m) in sorted(iteritems(ebook.mime_map)) if m in OEB_DOCS and n not in names]
     return tuple(names + others)
 
 def get_spinenames(ebook):
     return tuple([n for (n, lin) in ebook.spine_names])
 
 def get_ncxnames(ebook):
-    names = [n for (n, m) in ebook.mime_map.iteritems() if m == NCX_MIME]
-    if len(names) == 0:
+    names = [n for (n, m) in iteritems(ebook.mime_map) if m == NCX_MIME]
+    if not names:
         [names.append(n) for n in ebook.mime_map if n.rpartition('.')[-1] == 'ncx']
     return tuple(names)
 
 def get_imgnames(ebook, mtypes):
-    if isinstance(mtypes, (str, unicode)):
+    if isinstance(mtypes, unicode_type):
         mtypes = [mtypes]
-    return tuple(sorted([n for (n, m) in ebook.mime_map.iteritems() if m in mtypes]))
+    return tuple(sorted([n for (n, m) in iteritems(ebook.mime_map) if m in mtypes]))
 
 def get_fontnames(ebook):
     # sometimes embedded fonts have an incorrect media-type
-    names = set([n for (n, m) in ebook.mime_map.iteritems() if m in OEB_FONTS])
+    names = set([n for (n, m) in iteritems(ebook.mime_map) if m in OEB_FONTS])
     [names.add(n) for n in ebook.mime_map if n.rpartition('.')[-1] in ('otf', 'ttf')]
     return tuple(sorted(names))
 
 def get_cssnames(ebook):
-    names = [n for (n, m) in ebook.mime_map.iteritems() if m in OEB_STYLES]
+    names = [n for (n, m) in iteritems(ebook.mime_map) if m in OEB_STYLES]
     [names.append(n) for n in ebook.mime_map if n.rpartition('.')[-1] == 'css' and n not in names]
     return tuple(sorted(names))
 
@@ -1181,7 +1182,7 @@ if __name__ == "__main__":
     #MY_SETTINGS['x_fnames'] = False     # True = Rename files (HTML, images, CSS) to generic filenames
 
     app = QApplication(sys.argv)
-    win = EbookScramble(None, ebook_path, book_id=None, dsettings=MY_SETTINGS, progdir=progdir)
+    win = EbookScramble(ebook_path, book_id=None, dsettings=MY_SETTINGS, progdir=progdir)
 
     win.show()
     app.exec_()

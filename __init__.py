@@ -24,13 +24,13 @@ class ScrambleEbookActionBase(InterfaceActionBase):
     description         = 'Create a copyright-safe scrambled copy of an ebook for debugging purposes'
     supported_platforms = ['windows', 'osx', 'linux']
     author              = 'jackie_w'
-    version             = (0, 0, 5)
-    minimum_calibre_version = (1, 48, 0)
+    version             = (0, 0, 9)
+    minimum_calibre_version = (3, 41, 0)
 
     #: This field defines the GUI plugin class that contains all the code
     #: that actually does something. Its format is module_path:class_name
     #: The specified class must be defined in the specified module.
-    actual_plugin       = 'calibre_plugins.scrambleebook_plugin.action:ScrambleEbookUiAction'
+    actual_plugin       = 'calibre_plugins.scrambleebook_plugin.uiaction:ScrambleEbookUiAction'
 
     def is_customizable(self):
         ''' This method must return True to enable customization via
