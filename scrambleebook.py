@@ -15,22 +15,34 @@ from PyQt5.Qt import (QApplication, QDialog, Qt, QLabel, QTextBrowser,
     QLineEdit, QIcon, QUrl, QListWidget, QSplitter,
     QTextEdit, QTextDocument)
 
+try:
+    from PyQt5.QtWebKitWidgets import QWebView as Webview
+    print('PyQt5.QtWebKitWidgets.QWebView OK')
+except:
+    print('PyQt5.QtWebKitWidgets.QWebView failed')
+    try:
+        from PyQt5.QtWebEngineWidgets import QWebEngineView as Webview
+        print('PyQt5.QtWebEngineWidgets.QWebEngineView OK')
+    except:
+        print('PyQt5.QtWebEngineWidgets.QWebEngineView failed')
+        Webview = None
 
 from calibre.library import db
 from calibre.gui2 import (choose_dir, choose_files, error_dialog, warning_dialog)
 from calibre.ptempfile import PersistentTemporaryDirectory
 from calibre.utils.filenames import ascii_text
 from calibre.utils.magick import Image
-#from calibre.ebooks.oeb.display.webview import load_html
 from calibre.ebooks.oeb.base import (OEB_DOCS, OEB_STYLES, NCX_MIME, SVG_MIME, OEB_RASTER_IMAGES)
 from calibre.ebooks.oeb.polish.container import (get_container, clone_container, OEB_FONTS)
 from calibre.ebooks.oeb.polish.check.main import run_checks
 from calibre.ebooks.oeb.polish.cover import find_cover_image
 from calibre.ebooks.oeb.polish.replace import rename_files
-from calibre.ebooks.oeb.polish.pretty import pretty_all
+#from calibre.ebooks.oeb.polish.pretty import pretty_all
 
-MYNAME = 'ScrambleEbook'
-MYVERSION = (0, 0, 10)
+from calibre_plugins.scrambleebook_plugin import PLUGIN_NAME, PLUGIN_VERSION
+
+CAPTION = '%s [v%s]' % (PLUGIN_NAME, PLUGIN_VERSION)
+
 MR_SETTINGS = {
     'x_dgts': True,
     'x_html': True,
@@ -48,22 +60,22 @@ MR_SETTINGS = {
 
 CSSBG = 'background-color: #ebdbc8;'
 
-
 class EbookScramble(QDialog):
     ''' Read an EPUB/KEPUB/AZW3 de-DRM'd ebook file and
         scramble various contents '''
 
-    def __init__(self, pathtoebook, book_id=None, dsettings={}, progdir=None, from_calibre=False, parent=None):
+    def __init__(self, pathtoebook, book_id=None, from_calibre=False, dsettings={}, calibre_libpaths=[], parent=None):
         QDialog.__init__(self, parent=parent)
         self.gui = parent
         self.pathtoebook = pathtoebook
         self.book_id = book_id
-        self.progdir = progdir
-
+        self.from_calibre = from_calibre
+        self.calibre_libpaths = calibre_libpaths
         self.dsettings = MR_SETTINGS.copy()
         self.dsettings.update(dsettings)
-        self.from_calibre = from_calibre
 
+        self.ebook = None
+        self.eborig = None
         self.cleanup_dirs = []
         self.cleanup_files = []
         self.log = []
@@ -74,26 +86,8 @@ class EbookScramble(QDialog):
         self.dummyimg = None
         self.dummysvg = ''
 
-        self.callibs = tuple([])
-        self.lib_path, self.db = None, None
-        if self.from_calibre:
-            #excl = self.gui.iactions['Choose Library'].stats.stats.keys()
-            excl = list(self.gui.iactions['Choose Library'].stats.stats.keys())
-            self.callibs = tuple([os.path.normpath(k) for k in excl])
-            self.db = self.gui.current_db
-            lib_path = self.db.library_path
-            self.lib_path = os.path.normpath(lib_path)
-
-        self.setWindowTitle(MYNAME)
-
-        try:
-            icon = get_icons('images/plugin_icon.png')
-            self.setWindowIcon(icon)
-        except NameError:
-            icon = QIcon(os.path.join(self.progdir, 'images', 'plugin_icon.png'))
-            self.setWindowIcon(icon)
-        else:
-            pass
+        self.setWindowTitle(CAPTION)
+        self.setWindowIcon(get_icons('images/plugin_icon.png'))
 
         # create widgets
         self.buttonBox = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -119,6 +113,9 @@ class EbookScramble(QDialog):
         about_button = QPushButton('About', self)
         self.runButton = QPushButton('Scramble now')
         previewButton = QPushButton('Preview content')
+        if Webview is None:
+            previewButton.setEnabled(False)
+            previewButton.setToolTip('Preview not currently available for this book')
 
         configButton = QPushButton('Change rules *')
         configButton.setToolTip('Only available in standalone version, not calibre plugin')
@@ -171,8 +168,7 @@ class EbookScramble(QDialog):
         # create connect signals/slots
         about_button.clicked.connect(self.about_button_clicked)
         self.runButton.clicked.connect(self.create_scramble_book)
-        #previewButton.clicked.connect(self.preview_ebook)
-        previewButton.clicked.connect(self.previewbutton_clicked)
+        previewButton.clicked.connect(self.preview_ebook)
         configButton.clicked.connect(self.change_rules)
         metadataButton.clicked.connect(self.view_metadata)
         errorsButton.clicked.connect(self.view_errors)
@@ -206,14 +202,12 @@ class EbookScramble(QDialog):
                 fileok = False
                 msg = "Source ebook must be de-DRM'd and in one of these formats:" \
                     "\n- azw3\n- epub\n- kepub\n- kepub.epub.\n\nPlease select another."
-                error_dialog(self, 'Unsuitable file', msg, show=True, show_copy_button=True)
+                error_dialog(self, CAPTION,
+                    msg, show=True, show_copy_button=True)
 
         if not fileok:
             self.log.append('No ebook selected yet')
         else:
-            # tidy up HTML so no encoding problem
-            pretty_all(self.ebook)
-
             self.cleanup_dirs.append(self.ebook.root)
             tdir = PersistentTemporaryDirectory('_scramble_clone_orig')
             self.cleanup_dirs.append(tdir)
@@ -226,26 +220,16 @@ class EbookScramble(QDialog):
             if self.book_id is not None:
                 # calibre library book
                 self.cleanup_files.append(self.ebook.path_to_ebook)
-                sourcepath = os.path.join(self.lib_path, fname + '.' + ext)
-            else:
-                # not calibre library book, ie standalone or book on attached device
-                sourcepath = self.ebook.path_to_ebook
+            sourcepath = self.ebook.path_to_ebook
+
+            self.dummyimg = get_resources('images/' + format + '.png')
+            self.dummysvg = get_resources('images/' + format + '.svg')
 
             if self.from_calibre:
                 # calibre plugin
-                self.dummyimg = get_resources('images/' + format + '.png')
-                self.dummysvg = get_resources('images/' + format + '.svg')
                 self.dirout = ''
             else:
                 # standalone version
-                dummyimgdir = os.path.join(self.progdir, 'images')
-                dummy_imgpath = os.path.join(dummyimgdir, format + '.png')
-                with open(dummy_imgpath, 'rb') as f:
-                    self.dummyimg = f.read()
-                dummy_svgpath = os.path.join(dummyimgdir, format + '.svg')
-                with open(dummy_svgpath, 'rb') as f:
-                    ans = f.read()
-                self.dummysvg = self.ebook.decode(ans)
                 self.dirout = dirn
                 self.log.append('\n--- New ebook: %s' % sourcepath)
 
@@ -280,7 +264,7 @@ class EbookScramble(QDialog):
         QDialog.reject(self)
 
     def cleanup(self):
-        ''' delete calibre plugin temp files '''
+        # delete calibre plugin temp files
         if self.book_id:
             for f in self.cleanup_files:
                 try:
@@ -308,19 +292,18 @@ class EbookScramble(QDialog):
             askagain = False
             if savedir is not None:
                 savedir = os.path.normpath(savedir)
-                if [savedir.startswith(path) for path in self.callibs].count(True) > 0:
+                if savedir.startswith(tuple(self.calibre_libpaths)):
                     askagain = True
                     msg = []
                     msg.append('You have selected a destination inside your Calibre library.')
                     msg.append(savedir)
                     msg.append('\nThis is NOT recommended. Try again.')
                     msg.append('\nPlease avoid the following:')
-                    [msg.append(path) for path in sorted(self.callibs)]
+                    [msg.append(path) for path in sorted(self.calibre_libpaths)]
                     warning_dialog(self, 'Calibre library chosen', '\n'.join(msg), show=True, show_copy_button=True)
         return savedir
 
     def choose_source_ebook(self):
-        #sf = unicode(self.sourcefile.text())
         sf = self.sourcefile.text()
         seldir = get_fileparts(sf)[0] if sf else ''
         title = _('Select source ebook')
@@ -330,8 +313,11 @@ class EbookScramble(QDialog):
             self.initialise_new_file(self.pathtoebook)
 
     def create_scramble_book(self):
-        #sf = unicode(self.sourcefile.text())
+        if self.ebook is None:
+            return
+
         sf = self.sourcefile.text()
+
         self.log.append('\nScrambling %s ...' % sf)
         self.viewlog()
 
@@ -355,23 +341,29 @@ class EbookScramble(QDialog):
             self.log.append('\n--- Scrambling rules updated ---')
         self.viewlog()
 
-    def previewbutton_clicked(self):
-        #dlg = EbookScramblePreviewDlg(self.ebook, self.eborig, self.is_scrambled, self.rename_file_map, parent=self.gui)
-        #dlg.exec_()
-        from calibre.debug import run_calibre_debug
+    def preview_ebook(self):
+        if self.ebook is None:
+            return
 
-        msg = 'preview run via calibre-debug'
-        print('%s - Start' % msg)
-        run_calibre_debug(['-c', 'from calibre_plugins.scrambleebook_plugin.viewer import main; import sys; main(sys.argv[-1]);', 'running OK'])
-        print('%s - End' % msg)
+        dlg = EbookScramblePreviewDlg(self.ebook, self.eborig, self.is_scrambled, self.rename_file_map, parent=self.gui)
+        dlg.exec_()
+        dlg.raise_()
 
     def view_metadata(self):
+        if self.ebook is None:
+            return
+
         dlg = EbookScrambleMetadataDlg(self.meta, parent=self.gui)
         dlg.exec_()
+        dlg.raise_()
 
     def view_errors(self):
+        if self.ebook is None:
+            return
+
         dlg = EbookScrambleErrorsDlg(self.errors, parent=self.gui)
         dlg.exec_()
+        dlg.raise_()
 
     def display_settings(self):
         self.log.append('\nCurrent Scramble rules:')
@@ -392,14 +384,10 @@ class EbookScramble(QDialog):
         # should pass a list of names to get_resources. In this case,
         # get_resources will return a dictionary mapping names to bytes. Names that
         # are not found in the zip file will not be in the returned dictionary.
-        ver = 'v%d.%d.%d ' % MYVERSION
-        try:
-            text = get_resources('about.txt')
-            ver += 'calibre plugin'
-        except:
-            text = 'Configurable utility for creating a copy of an ebook with scrambled text content.\n(azw3, epub, kepub, kepub.epub)\n\nIts purpose is to avoid breach of copyright when you need to share the ebook with someone but the text content is unimportant, e.g. resolving technical problems.'
-            ver += 'standalone'
-        QMessageBox.about(self, 'About %s [%s]' % (MYNAME, ver), text)
+
+        source = 'calibre plugin' if self.from_calibre else 'standalone'
+        text = get_resources('about.txt')
+        QMessageBox.about(self, 'About %s %s' % (CAPTION, source), text)
 
 
 class EbookScrambleAction():
@@ -718,7 +706,7 @@ class EbookScrambleRulesDlg(QDialog):
         'x_fnames': 'Rename to generic filenames (not AZW3)\n(HTML, images, CSS)'
         }
 
-        self.setWindowTitle('%s: Configure rules' % MYNAME)
+        self.setWindowTitle('%s: Configure rules' % CAPTION)
 
         buttonBox = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
 
@@ -844,18 +832,6 @@ class EbookScrambleRulesDlg(QDialog):
 
 class EbookScramblePreviewDlg(QDialog):
 
-    try:
-        from PyQt5.QtWebKitWidgets import QWebView as Webview
-        print('PyQt5.QtWebKitWidgets.QWebView OK')
-    except:
-        print('PyQt5.QtWebKitWidgets.QWebView failed')
-        try:
-            from PyQt5.QtWebEngineWidgets import QWebEngineView as Webview
-            print('PyQt5.QtWebEngineWidgets.QWebEngineView OK')
-        except:
-            print('PyQt5.QtWebEngineWidgets.QWebEngineView failed')
-            pass
-
     def __init__(self, ebook, orig, is_scrambled, fmap, parent=None):
         QDialog.__init__(self, parent=parent)
 
@@ -866,41 +842,26 @@ class EbookScramblePreviewDlg(QDialog):
         self.revfmap = {v:k for (k, v) in iteritems(fmap)}
 
         # create widgets
+        lay = QVBoxLayout()
+        self.setLayout(lay)
+
         buttonBox = QDialogButtonBox(QDialogButtonBox.Close)
 
-        try:
-            # pre-calibre 4 where QtWebKit is always available or
-            # post-calibre 4 when run outside calibre plugin when QtWebEngine is available
-            self.webview_orig = self.Webview()
-            self.webview_scram = self.Webview()
-            settings = self.webview_orig.settings()
-            if hasattr(settings, 'setUserStyleSheetUrl'):
-                # QWebView from QtWebKit
-                style = 'body {%s}' % CSSBG
-                cssurl = 'data:text/css;charset=utf-8;base64,'
-                cssurl += as_base64_unicode(style)
-                print('QWebView setUserStyleSheetUrl', style)
-                self.webview_orig.settings().setUserStyleSheetUrl(QUrl(cssurl))
-                self.webview_scram.settings().setUserStyleSheetUrl(QUrl(cssurl))
-            elif hasattr(self.webview_orig, 'setStyleSheet'):
-                # QWebEngineView from QtWebEngine
-                # doesn't seem to work at the moment
-                print('QWebEngineView setStyleSheet', CSSBG)
-                self.webview_orig.setStyleSheet('Webview {%s}' % CSSBG)
-                self.webview_scram.setStyleSheet('Webview {%s}' % CSSBG)
-        except:
-            # post-calibre 4 when run from calibre plugin as no QtWebEngine available
-            self.webview_orig = QTextBrowser()
-            self.webview_scram = QTextBrowser()
-            print('QTextBrowser setStyleSheet', CSSBG)
-            self.webview_orig.setStyleSheet('QTextBrowser {%s}' % CSSBG)
-            self.webview_scram.setStyleSheet('QTextBrowser {%s}' % CSSBG)
-            self.webview_orig.setMinimumHeight(500)
-            self.webview_scram.setMinimumHeight(500)
-
-
-        self.webview_orig.setMinimumWidth(400)
-        self.webview_scram.setMinimumWidth(400)
+        self.webview_orig = Webview()
+        self.webview_scram = Webview()
+        settings = self.webview_orig.settings()
+        if hasattr(settings, 'setUserStyleSheetUrl'):
+            # QWebView from QtWebKit
+            style = 'body {%s}' % CSSBG
+            cssurl = 'data:text/css;charset=utf-8;base64,'
+            cssurl += as_base64_unicode(style)
+            self.webview_orig.settings().setUserStyleSheetUrl(QUrl(cssurl))
+            self.webview_scram.settings().setUserStyleSheetUrl(QUrl(cssurl))
+        elif hasattr(self.webview_orig, 'setStyleSheet'):
+            # QWebEngineView from QtWebEngine
+            # setStyleSheet doesn't seem to work at the moment
+            self.webview_orig.setStyleSheet('Webview {%s}' % CSSBG)
+            self.webview_scram.setStyleSheet('Webview {%s}' % CSSBG)
 
         dummytext = '<body><p>*** Text content could not be displayed ...</p></body>'
         self.webview_orig.setHtml(dummytext)
@@ -937,8 +898,6 @@ class EbookScramblePreviewDlg(QDialog):
         splitter.addWidget(gpbox3)
         splitter.addWidget(gpbox4)
 
-        lay = QVBoxLayout()
-        self.setLayout(lay)
         lay.addWidget(splitter)
         lay.addWidget(buttonBox)
 
@@ -961,7 +920,7 @@ class EbookScramblePreviewDlg(QDialog):
         if not self.revfmap:
             gpbox1.setVisible(False)
 
-        msg = '%s Preview: Original' % MYNAME
+        msg = '%s Preview: Original' % CAPTION
         if not is_scrambled:
             self.setWindowTitle(msg)
             gpbox1.setVisible(False)
@@ -980,7 +939,6 @@ class EbookScramblePreviewDlg(QDialog):
         self.webview_refresh(name)
 
     def htmlList_itemDoubleClicked(self, item):
-        #name = unicode(item.text())
         name = item.text()
         self.webview_refresh(name)
 
@@ -1043,7 +1001,7 @@ class EbookScrambleMetadataDlg(QDialog):
         origbrowser.setText(metaorig)
         browser.setText(metadata.get('scramb', ''))
 
-        self.setWindowTitle('%s: Metadata' % MYNAME)
+        self.setWindowTitle('%s: Metadata' % CAPTION)
         if not 'scramb' in metadata:
             gpbox4.setVisible(False)
 
@@ -1083,7 +1041,7 @@ class EbookScrambleErrorsDlg(QDialog):
         buttonBox.rejected.connect(self.reject)
         self.ctc_button.clicked.connect(self.copy_to_clipboard)
 
-        self.setWindowTitle('%s: Calibre error checks' % MYNAME)
+        self.setWindowTitle('%s: Calibre error checks' % CAPTION)
 
         if 'scramb' in self.derrors:
             msg = 'Original vs. After scrambling'
@@ -1117,21 +1075,6 @@ class EbookScrambleErrorsDlg(QDialog):
             '%s\n\n%s' % (self.windowTitle(), self.report))
         if hasattr(self, 'ctc_button'):
             self.ctc_button.setText(_('Copied'))
-
-class SimpleDlg(QDialog):
-    def __init__(self, textin, parent=None):
-        QDialog.__init__(self, parent=parent)
-
-        label = QLabel(textin)
-        buttonBox = QDialogButtonBox(QDialogButtonBox.Close)
-
-        layout = QVBoxLayout()
-        layout.addWidget(label)
-        layout.addWidget(buttonBox)
-        self.setLayout(layout)
-
-        self.setWindowTitle('Simple')
-        buttonBox.rejected.connect(self.reject)
 
 # ####################################################################
 
@@ -1199,18 +1142,13 @@ def get_fileparts(path):
     is_kepub_epub = fn.rpartition('.')[-1].lower() == 'kepub'
     return (dirname, fn, ext, is_kepub_epub)
 
+def main(prog, args):
+    # Run the plugin
 
-if __name__ == "__main__":
-    import sys
-
-    prog = sys.argv[0]
-    progdir, x, x, x = get_fileparts(prog)
-
-    if len(sys.argv) > 1:
-        # Windows Send-to or drag-drop onto .bat
-        ebook_path = sys.argv[1]
-    else:
-        ebook_path = ''
+    ebook_path = ''
+    if args:
+        # Windows Send-to or drag-drop ebook onto .bat
+        ebook_path = args[0]
 
     MY_SETTINGS = {}
     ''' un-comment & edit the following if you want your own default settings '''
@@ -1228,8 +1166,15 @@ if __name__ == "__main__":
     #MY_SETTINGS['x_meta_extra'] = False # True = Try to remove other metadata which identifies book
     #MY_SETTINGS['x_fnames'] = False     # True = Rename files (HTML, images, CSS) to generic filenames
 
-    app = QApplication(sys.argv)
-    win = EbookScramble(ebook_path, dsettings=MY_SETTINGS, progdir=progdir)
-
-    win.show()
+    app = QApplication(args)
+    w = EbookScramble(ebook_path, dsettings=MY_SETTINGS)
+    w.show()
+    w.raise_()
     app.exec_()
+
+if __name__ == "__main__":
+    import sys
+
+    main(sys.argv[0], sys.argv[1:])
+
+

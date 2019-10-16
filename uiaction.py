@@ -25,7 +25,7 @@ from PyQt5.Qt import (QMenu, QToolButton,
 from calibre.gui2 import error_dialog
 
 #from calibre_plugins.scrambleebook_plugin.config import prefs
-from calibre_plugins.scrambleebook_plugin.scrambleebook import (EbookScramble, get_fileparts)
+from calibre_plugins.scrambleebook_plugin.scrambleebook import get_fileparts #, EbookScramble
 
 OK_FORMATS = ('AZW3', 'EPUB', 'KEPUB')
 
@@ -80,7 +80,8 @@ class ScrambleEbookUiAction(InterfaceAction):
     def location_selected(self, loc):
         self.is_library_selected = loc == 'library'
 
-    '''def apply_settings(self):
+    '''
+    def apply_settings(self):
         # In an actual non trivial plugin, you would probably need to
         # do something based on the settings in prefs, e.g. rebuild menus
         # prefs
@@ -94,7 +95,8 @@ class ScrambleEbookUiAction(InterfaceAction):
         m.clear()
 
     def show_configuration(self):
-        self.interface_action_base_plugin.do_user_config(self.gui) '''
+        self.interface_action_base_plugin.do_user_config(self.gui)
+    '''
 
     def show_dialog(self):
         #base_plugin_object = self.interface_action_base_plugin
@@ -117,13 +119,17 @@ class ScrambleEbookUiAction(InterfaceAction):
 
             if self.is_library_selected:
                 # book is in calibre library
-                #book_ids = list(map(self.gui.library_view.model().id, rows))
                 book_ids = self.gui.library_view.get_selected_ids()
                 book_id = book_ids[0]
 
+                db = self.gui.current_db.new_api
+
+                # get paths to all known calibre libraries
+                excl = list(self.gui.iactions['Choose Library'].stats.stats.keys())
+                calibre_libpaths = [os.path.abspath(k) for k in excl]
+
                 # check which formats exist and select one
-                db = self.gui.current_db
-                avail_fmts = db.new_api.formats(book_id, verify_formats=True)
+                avail_fmts = db.formats(book_id, verify_formats=True)
                 valid_fmts = [f for f in OK_FORMATS if f in avail_fmts]
 
                 if len(valid_fmts) > 1:
@@ -133,7 +139,7 @@ class ScrambleEbookUiAction(InterfaceAction):
 
                 try:
                     fmt = valid_fmts[0]
-                    path_to_ebook = db.new_api.format(book_id, fmt, as_path=True, preserve_filename=True)
+                    path_to_ebook = db.format(book_id, fmt, as_path=True, preserve_filename=True)
                 except:
                     path_to_ebook = None
 
@@ -153,8 +159,32 @@ class ScrambleEbookUiAction(InterfaceAction):
                     raise SelectedBookError(errmsg)
 
             # all OK, proceed with action
-            dlg = EbookScramble(path_to_ebook, book_id=book_id, from_calibre=True, parent=self.gui)
-            dlg.exec_()
+
+            # view main dialog via cli_main()
+            #from calibre.debug import run_calibre_debug
+            #run_calibre_debug('--run-plugin', 'ScrambleEbook', path_to_ebook, str(book_id), 'True')
+
+            try:
+                # calibre 4 beta onwards
+                # view main dialog via launching a separate process which can access QtWebEngine
+                # NB: if name of function in run_plugin_as_process.py is 'main'
+                #     then the 'func' parameter below is not needed
+                self.gui.job_manager.launch_gui_app('webengine-dialog',
+                    kwargs={
+                        'module':'calibre_plugins.scrambleebook_plugin.run_plugin_as_process',
+                        # 'func': 'main',
+                        'path_to_ebook':path_to_ebook,
+                        'book_id':book_id,
+                        'from_calibre':True,
+                        'calibre_libpaths':calibre_libpaths
+                        }
+                    )
+            except:
+                # calibre 3.x.x
+                # view main dialog as standard UI plugin
+                from calibre_plugins.scrambleebook_plugin.scrambleebook import EbookScramble
+                dlg = EbookScramble(path_to_ebook, book_id=book_id, from_calibre=True, parent=self.gui)
+                dlg.exec_()
 
         except SelectedBookError as err:
             return error_dialog(self.gui,
